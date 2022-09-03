@@ -1,0 +1,11 @@
+
+
+
+python detect_mask_image.py -i images/pic3.jpg
+
+
+python detect_mask_video.py
+
+python train_mask_detector.py --dataset dataset
+
+
