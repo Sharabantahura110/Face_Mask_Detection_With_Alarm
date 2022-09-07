@@ -1,3 +1,3 @@
 Please contact if you find any problem.
 
-s.samiul@stud.fra-uas.de
+samiul.stu2014@juniv.edu
