@@ -1,119 +1,108 @@
 import streamlit as st
-from PIL import Image, ImageEnhance
 import numpy as np
 import cv2
-import os
+from pathlib import Path
+from tensorflow.keras.models import load_model
 from tensorflow.keras.applications.mobilenet_v2 import preprocess_input
 from tensorflow.keras.preprocessing.image import img_to_array
-from tensorflow.keras.models import load_model
-import detect_mask_image
 
-# Setting custom Page Title and Icon with changed layout and sidebar state
-st.set_page_config(page_title='Face Mask Detector', page_icon='😷', layout='centered', initial_sidebar_state='expanded')
+st.set_page_config(page_title="Face Mask Detector", page_icon="😷", layout="centered")
 
+st.title("😷 Face Mask Detection")
 
-def local_css(file_name):
-    """ Method for reading styles.css and applying necessary changes to HTML"""
-    with open(file_name) as f:
-        st.markdown(f'<style>{f.read()}</style>', unsafe_allow_html=True)
+# ---------- Load models once (cached) ----------
+@st.cache_resource
+def load_models():
+    face_proto = Path("face_detector") / "deploy.prototxt"
+    face_model = Path("face_detector") / "res10_300x300_ssd_iter_140000.caffemodel"
+    if not face_proto.exists() or not face_model.exists():
+        raise FileNotFoundError(
+            "Face detector files not found. Make sure 'face_detector/deploy.prototxt' "
+            "and 'face_detector/res10_300x300_ssd_iter_140000.caffemodel' exist in the repo."
+        )
+    net = cv2.dnn.readNetFromCaffe(str(face_proto), str(face_model))
 
+    mask_model_path = Path("mask_detector.model")
+    if not mask_model_path.exists():
+        raise FileNotFoundError(
+            "Mask model not found. Place 'mask_detector.model' at the repo root."
+        )
+    clf = load_model(str(mask_model_path))
+    return net, clf
 
-def mask_image():
-    global RGB_img
-    # load our serialized face detector model from disk
-    print("[INFO] loading face detector model...")
-    prototxtPath = os.path.sep.join(["face_detector", "deploy.prototxt"])
-    weightsPath = os.path.sep.join(["face_detector",
-                                    "res10_300x300_ssd_iter_140000.caffemodel"])
-    net = cv2.dnn.readNet(prototxtPath, weightsPath)
+try:
+    net, clf = load_models()
+except Exception as e:
+    st.error(f"Model load error: {e}")
+    st.stop()
 
-    # load the face mask detector model from disk
-    print("[INFO] loading face mask detector model...")
-    model = load_model("mask_detector.model")
-
-    # load the input image from disk and grab the image spatial
-    # dimensions
-    image = cv2.imread("./images/out.jpg")
-    (h, w) = image.shape[:2]
-
-    # construct a blob from the image
-    blob = cv2.dnn.blobFromImage(image, 1.0, (300, 300),
+# ---------- Inference ----------
+def detect_and_annotate(bgr_img: np.ndarray, conf_thresh: float = 0.5):
+    h, w = bgr_img.shape[:2]
+    blob = cv2.dnn.blobFromImage(cv2.resize(bgr_img, (300, 300)), 1.0, (300, 300),
                                  (104.0, 177.0, 123.0))
-
-    # pass the blob through the network and obtain the face detections
-    print("[INFO] computing face detections...")
     net.setInput(blob)
-    detections = net.forward()
+    dets = net.forward()
 
-    # loop over the detections
-    for i in range(0, detections.shape[2]):
-        # extract the confidence (i.e., probability) associated with
-        # the detection
-        confidence = detections[0, 0, i, 2]
+    count = 0
+    for i in range(dets.shape[2]):
+        confidence = dets[0, 0, i, 2]
+        if confidence < conf_thresh:
+            continue
 
-        # filter out weak detections by ensuring the confidence is
-        # greater than the minimum confidence
-        if confidence > 0.5:
-            # compute the (x, y)-coordinates of the bounding box for
-            # the object
-            box = detections[0, 0, i, 3:7] * np.array([w, h, w, h])
-            (startX, startY, endX, endY) = box.astype("int")
+        box = dets[0, 0, i, 3:7] * np.array([w, h, w, h])
+        (x1, y1, x2, y2) = box.astype("int")
+        x1, y1 = max(0, x1), max(0, y1)
+        x2, y2 = min(w - 1, x2), min(h - 1, y2)
 
-            # ensure the bounding boxes fall within the dimensions of
-            # the frame
-            (startX, startY) = (max(0, startX), max(0, startY))
-            (endX, endY) = (min(w - 1, endX), min(h - 1, endY))
+        face = bgr_img[y1:y2, x1:x2]
+        if face.size == 0:
+            continue
 
-            # extract the face ROI, convert it from BGR to RGB channel
-            # ordering, resize it to 224x224, and preprocess it
-            face = image[startY:endY, startX:endX]
-            face = cv2.cvtColor(face, cv2.COLOR_BGR2RGB)
-            face = cv2.resize(face, (224, 224))
-            face = img_to_array(face)
-            face = preprocess_input(face)
-            face = np.expand_dims(face, axis=0)
+        face_rgb = cv2.cvtColor(face, cv2.COLOR_BGR2RGB)
+        face_rgb = cv2.resize(face_rgb, (224, 224))
+        arr = img_to_array(face_rgb)
+        arr = preprocess_input(arr)
+        arr = np.expand_dims(arr, axis=0)
 
-            # pass the face through the model to determine if the face
-            # has a mask or not
-            (mask, withoutMask) = model.predict(face)[0]
+        (mask, no_mask) = clf.predict(arr, verbose=0)[0]
+        label = "Mask" if mask > no_mask else "No Mask"
+        score = float(max(mask, no_mask))
+        color = (0, 200, 0) if label == "Mask" else (0, 0, 200)
 
-            # determine the class label and color we'll use to draw
-            # the bounding box and text
-            label = "Mask" if mask > withoutMask else "No Mask"
-            color = (0, 255, 0) if label == "Mask" else (0, 0, 255)
+        cv2.rectangle(bgr_img, (x1, y1), (x2, y2), color, 2)
+        cv2.putText(bgr_img, f"{label}: {score:.2f}", (x1, y1 - 8),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
+        count += 1
 
-            # include the probability in the label
-            label = "{}: {:.2f}%".format(label, max(mask, withoutMask) * 100)
+    return bgr_img, count
 
-            # display the label and bounding box rectangle on the output
-            # frame
-            cv2.putText(image, label, (startX, startY - 10),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.45, color, 2)
-            cv2.rectangle(image, (startX, startY), (endX, endY), color, 2)
-            RGB_img = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-mask_image()
+# ---------- UI ----------
+st.sidebar.header("Settings")
+conf_thresh = st.sidebar.slider("Face detection confidence", 0.1, 0.9, 0.5, 0.05)
+mode = st.radio("Choose input", ["Upload Image", "Webcam (beta)"])
 
-def mask_detection():
-    local_css("css/styles.css")
-    st.markdown('<h1 align="center">😷 Face Mask Detection</h1>', unsafe_allow_html=True)
-    activities = ["Image", "Webcam"]
-    st.set_option('deprecation.showfileUploaderEncoding', False)
-    st.sidebar.markdown("# Mask Detection on?")
-    choice = st.sidebar.selectbox("Choose among the given options:", activities)
+if mode == "Upload Image":
+    up = st.file_uploader("Upload a JPG/PNG", type=["jpg", "jpeg", "png"])
+    if up:
+        data = np.frombuffer(up.read(), np.uint8)
+        bgr = cv2.imdecode(data, cv2.IMREAD_COLOR)
+        if bgr is None:
+            st.error("Could not read image.")
+        else:
+            out, n = detect_and_annotate(bgr.copy(), conf_thresh)
+            st.image(cv2.cvtColor(out, cv2.COLOR_BGR2RGB), channels="RGB", use_container_width=True)
+            st.caption(f"Faces processed: {n}")
 
-    if choice == 'Image':
-        st.markdown('<h2 align="center">Detection on Image</h2>', unsafe_allow_html=True)
-        st.markdown("### Upload your image here ⬇")
-        image_file = st.file_uploader("", type=['jpg'])  # upload image
-        if image_file is not None:
-            our_image = Image.open(image_file)  # making compatible to PIL
-            im = our_image.save('./images/pic3.jpg')
-            saved_image = st.image(image_file, caption='', use_column_width=True)
-            st.markdown('<h3 align="center">Image uploaded successfully!</h3>', unsafe_allow_html=True)
-            if st.button('Process'):
-                st.image(RGB_img, use_column_width=True)
-
-    if choice == 'Webcam':
-        st.markdown('<h2 align="center">Detection on Webcam</h2>', unsafe_allow_html=True)
-        st.markdown('<h3 align="center">This feature will be available soon!</h3>', unsafe_allow_html=True)
-mask_detection()
+else:
+    st.info("Click below and allow camera access in your browser.")
+    cam = st.camera_input("Live camera")
+    if cam is not None:
+        data = np.frombuffer(cam.getvalue(), np.uint8)
+        bgr = cv2.imdecode(data, cv2.IMREAD_COLOR)
+        if bgr is None:
+            st.error("Could not read camera frame.")
+        else:
+            out, n = detect_and_annotate(bgr.copy(), conf_thresh)
+            st.image(cv2.cvtColor(out, cv2.COLOR_BGR2RGB), channels="RGB", use_container_width=True)
+            st.caption(f"Faces processed: {n}")
