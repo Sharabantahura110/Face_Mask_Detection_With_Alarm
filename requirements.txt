@@ -8,3 +8,6 @@ pillow==10.3.0
 imutils==0.5.4
 onnx==1.16.1
 tf2onnx==1.16.1
+streamlit-webrtc==0.47.6
+av==10.0.0
+
