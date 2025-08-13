@@ -238,7 +238,7 @@ st.markdown(
     """
     <hr style="margin-top: 50px; margin-bottom: 10px;">
     <div style="text-align: center; font-size: 14px; color: gray;">
-        Made by <b>Samiul</b> 😷 | Contact: 
+        Developed by <b>Hasnat Samiul</b> ✌🏼 | Contact: 
         <a href="mailto:smhasnats@gmail.com" style="color: gray;">smhasnats@gmail.com</a>
     </div>
     """,
