@@ -91,7 +91,7 @@ if mode == "Upload Image":
             st.error("Could not read image.")
         else:
             out, n = detect_and_annotate(bgr.copy(), conf_thresh)
-            st.image(cv2.cvtColor(out, cv2.COLOR_BGR2RGB), channels="RGB", use_container_width=True)
+            st.image(cv2.cvtColor(out, cv2.COLOR_BGR2RGB), channels="RGB", use_column_width=True)
             st.caption(f"Faces processed: {n}")
 
 else:
@@ -104,5 +104,5 @@ else:
             st.error("Could not read camera frame.")
         else:
             out, n = detect_and_annotate(bgr.copy(), conf_thresh)
-            st.image(cv2.cvtColor(out, cv2.COLOR_BGR2RGB), channels="RGB", use_container_width=True)
+            st.image(cv2.cvtColor(out, cv2.COLOR_BGR2RGB), channels="RGB", use_column_width=True)
             st.caption(f"Faces processed: {n}")
