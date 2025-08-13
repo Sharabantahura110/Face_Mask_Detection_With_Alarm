@@ -1,6 +1,8 @@
 import streamlit as st
 import numpy as np
 import cv2
+import time
+import tempfile
 from pathlib import Path
 from base64 import b64encode
 
@@ -18,20 +20,17 @@ def load_models():
     face_model = Path("face_detector") / "res10_300x300_ssd_iter_140000.caffemodel"
     if not face_proto.exists() or not face_model.exists():
         raise FileNotFoundError(
-            "Face detector files not found. Make sure 'face_detector/deploy.prototxt' "
-            "and 'face_detector/res10_300x300_ssd_iter_140000.caffemodel' exist in the repo."
+            "Face detector files not found. Need 'face_detector/deploy.prototxt' "
+            "and 'face_detector/res10_300x300_ssd_iter_140000.caffemodel'."
         )
     net = cv2.dnn.readNetFromCaffe(str(face_proto), str(face_model))
 
     mask_model_path = Path("mask_detector.model")
     if not mask_model_path.exists():
-        raise FileNotFoundError(
-            "Mask model not found. Place 'mask_detector.model' at the repo root."
-        )
+        raise FileNotFoundError("Mask model not found. Place 'mask_detector.model' at repo root.")
     clf = load_model(str(mask_model_path))
     return net, clf
 
-# Load optional alarm sound (once)
 @st.cache_resource
 def load_alarm():
     p = Path("alert.mp3")
@@ -84,13 +83,12 @@ def detect_and_annotate(bgr_img: np.ndarray, conf_thresh: float = 0.5):
         (mask, no_mask) = clf.predict(arr, verbose=0)[0]
         label = "Mask" if mask > no_mask else "No Mask"
         score = float(max(mask, no_mask))
+        color = (0, 200, 0) if label == "Mask" else (0, 0, 200)
 
         if label == "Mask":
             has_mask = True
-            color = (0, 200, 0)
         else:
             has_no_mask = True
-            color = (0, 0, 200)
 
         cv2.rectangle(bgr_img, (x1, y1), (x2, y2), color, 2)
         cv2.putText(bgr_img, f"{label}: {score:.2f}", (x1, y1 - 8),
@@ -99,37 +97,39 @@ def detect_and_annotate(bgr_img: np.ndarray, conf_thresh: float = 0.5):
 
     return bgr_img, count, has_mask, has_no_mask
 
+# ---------- Alarm helpers ----------
+if "last_alarm" not in st.session_state:
+    st.session_state.last_alarm = 0.0
+
+def maybe_play_alarm(has_mask: bool, has_no_mask: bool, cooldown_s: float):
+    """Play alarm if trigger condition met; throttle by cooldown."""
+    if not alarm_enabled or alarm_bytes is None:
+        return
+    should_alarm = (alarm_trigger == "No Mask" and has_no_mask) or (alarm_trigger == "Mask" and has_mask)
+    now = time.time()
+    if should_alarm and (now - st.session_state.last_alarm) > cooldown_s:
+        st.warning("🚨 Alarm triggered")
+        st.audio(alarm_bytes, format="audio/mp3")  # always works after any user interaction
+        # (Optional) best-effort autoplay:
+        st.markdown(
+            f"""<audio autoplay><source src="data:audio/mp3;base64,{alarm_b64}" type="audio/mpeg"></audio>""",
+            unsafe_allow_html=True,
+        )
+        st.session_state.last_alarm = now
+
 # ---------- UI ----------
 st.sidebar.header("Settings")
 conf_thresh = st.sidebar.slider("Face detection confidence", 0.1, 0.9, 0.5, 0.05)
 
-# Alarm controls
 alarm_enabled = st.sidebar.toggle("Enable alarm sound", value=True)
 alarm_trigger = st.sidebar.selectbox("Alarm when …", ["No Mask", "Mask"])
+cooldown_s = st.sidebar.slider("Alarm cooldown (seconds)", 0.0, 10.0, 3.0, 0.5)
 if alarm_enabled and alarm_bytes is None:
     st.sidebar.warning("alert.mp3 not found at repo root — sound will be disabled.")
 
-mode = st.radio("Choose input", ["Upload Image", "Webcam (beta)"])
+mode = st.radio("Choose input", ["Upload Image", "Webcam (snapshot)", "Video (local camera)", "Video file"])
 
-def maybe_play_alarm(has_mask: bool, has_no_mask: bool):
-    """Play alarm if condition met; show visual notice. Browser may block auto-play."""
-    if not alarm_enabled or alarm_bytes is None:
-        return
-    should_alarm = (alarm_trigger == "No Mask" and has_no_mask) or (alarm_trigger == "Mask" and has_mask)
-    if should_alarm:
-        st.warning("🚨 Alarm triggered")
-        # Guaranteed playable after interaction:
-        st.audio(alarm_bytes, format="audio/mp3")
-        # Best-effort autoplay (may be blocked until user interacts):
-        st.markdown(
-            f"""
-            <audio autoplay>
-              <source src="data:audio/mp3;base64,{alarm_b64}" type="audio/mpeg">
-            </audio>
-            """,
-            unsafe_allow_html=True
-        )
-
+# ---------- Upload Image ----------
 if mode == "Upload Image":
     up = st.file_uploader("Upload a JPG/PNG", type=["jpg", "jpeg", "png"])
     if up:
@@ -141,10 +141,11 @@ if mode == "Upload Image":
             out, n, has_mask, has_no_mask = detect_and_annotate(bgr.copy(), conf_thresh)
             st.image(cv2.cvtColor(out, cv2.COLOR_BGR2RGB), channels="RGB", use_column_width=True)
             st.caption(f"Faces processed: {n}")
-            maybe_play_alarm(has_mask, has_no_mask)
+            maybe_play_alarm(has_mask, has_no_mask, cooldown_s)
 
-else:
-    st.info("Click below and allow camera access in your browser.")
+# ---------- Webcam (snapshot) ----------
+elif mode == "Webcam (snapshot)":
+    st.info("Click below and allow camera access in your browser, then take a snapshot.")
     cam = st.camera_input("Live camera")
     if cam is not None:
         data = np.frombuffer(cam.getvalue(), np.uint8)
@@ -155,4 +156,78 @@ else:
             out, n, has_mask, has_no_mask = detect_and_annotate(bgr.copy(), conf_thresh)
             st.image(cv2.cvtColor(out, cv2.COLOR_BGR2RGB), channels="RGB", use_column_width=True)
             st.caption(f"Faces processed: {n}")
-            maybe_play_alarm(has_mask, has_no_mask)
+            maybe_play_alarm(has_mask, has_no_mask, cooldown_s)
+
+# ---------- Video (local camera) ----------
+elif mode == "Video (local camera)":
+    st.info("Uses your machine's webcam via OpenCV. Not available on Streamlit Cloud.")
+    cam_index = st.sidebar.number_input("Camera index", min_value=0, max_value=5, value=0, step=1)
+    width = st.sidebar.slider("Frame width", 320, 1280, 640, 80)
+    fps_limit = st.sidebar.slider("Max FPS (approx)", 1, 30, 10, 1)
+
+    run = st.toggle("Start / Stop", value=False, key="run_local")
+    stframe = st.empty()
+
+    if run:
+        cap = cv2.VideoCapture(int(cam_index))
+        if not cap.isOpened():
+            st.error("Could not open local camera. Try a different index or run locally.")
+        else:
+            last = 0.0
+            try:
+                while st.session_state.run_local:
+                    ret, frame = cap.read()
+                    if not ret:
+                        st.warning("No frame read from camera.")
+                        break
+                    if width:
+                        frame = cv2.resize(frame, (width, int(width * frame.shape[0] / frame.shape[1])))
+
+                    out, n, has_mask, has_no_mask = detect_and_annotate(frame, conf_thresh)
+                    stframe.image(cv2.cvtColor(out, cv2.COLOR_BGR2RGB), channels="RGB", use_column_width=True)
+                    maybe_play_alarm(has_mask, has_no_mask, cooldown_s)
+
+                    # crude FPS limit
+                    dt = time.time() - last
+                    sleep_for = max(0.0, (1.0 / fps_limit) - dt)
+                    if sleep_for > 0:
+                        time.sleep(sleep_for)
+                    last = time.time()
+            finally:
+                cap.release()
+
+# ---------- Video file ----------
+else:
+    st.info("Upload a video to run continuous detection in the browser.")
+    vf = st.file_uploader("Upload a video", type=["mp4", "mov", "avi", "mkv"])
+    show_preview = st.checkbox("Show preview while processing", value=True)
+    max_frames = st.sidebar.slider("Max frames (0 = all)", 0, 3000, 0, 100)
+    if vf:
+        # Save to temp file for OpenCV
+        tfile = tempfile.NamedTemporaryFile(delete=False)
+        tfile.write(vf.read())
+        tfile.flush()
+
+        cap = cv2.VideoCapture(tfile.name)
+        stframe = st.empty()
+        frames_done = 0
+
+        if not cap.isOpened():
+            st.error("Could not open uploaded video.")
+        else:
+            try:
+                while True:
+                    ret, frame = cap.read()
+                    if not ret:
+                        break
+                    out, n, has_mask, has_no_mask = detect_and_annotate(frame, conf_thresh)
+                    if show_preview:
+                        stframe.image(cv2.cvtColor(out, cv2.COLOR_BGR2RGB), channels="RGB", use_column_width=True)
+                    maybe_play_alarm(has_mask, has_no_mask, cooldown_s)
+
+                    frames_done += 1
+                    if max_frames and frames_done >= max_frames:
+                        break
+            finally:
+                cap.release()
+        st.success(f"Processed {frames_done} frames.")
