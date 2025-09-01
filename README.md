@@ -1,10 +1,9 @@
 For Live Demo : 
 
-https://facemaskdetectionwithalarm.streamlit.app/
 
 Please contact if you find any problem.
 
-smhasnats@gmail.com
+sharabantahura110@gmail.com
 
 
 About This Project
