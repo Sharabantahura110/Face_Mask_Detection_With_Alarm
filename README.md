@@ -1,11 +1,12 @@
-For Live Demo : 
-
-
 Please contact if you find any problem.
 
 sharabantahura110@gmail.com
 
 
-About This Project
+The main objective is to detect whether a person is wearing a face mask correctly. If the system detects no mask or an improperly worn mask, it automatically triggers an alarm. This system combines OpenCV, a lightweight deep learning model, and TensorFlow/Keras, making it simple to build and train.
 
-From 2019, the pandemic situation has had a remarkable impact on people’s daily lives and also for their lives. And wearing a face mask every time is the primary way to minimize the damage and can control the virus. And for risk free nature, a mask detection system is proposed in this report. The fundamental plans of this project is to detect the face mask and if it detects no face mask or an inappropriate mask, then the system turns on an alarm automatically. And this system is using a combination of OpenCV, a lightweight deep learning model, and TensorFlow/kera,s which is simple to build and trained on. A lot of embedded devices like webcam or an alarm system, could be implemented in this project easily and though it uses MobileNetV2 as its backbone architecture, it gives a higher computational rate with fixed capability. The system can be easily integrated into various embedded devices with fixed computational capability, as it uses the MobileNetV2 architecture. In contemporary periods, COVID-19 has had a domino effect on manufacturing, travel, tourism, and hospitality, crippling the international economy. In extra to it, is the growth angle of human casualties across the world due to the pandemic, this project, which depends on computer vision and deep learning, intend to make an effect and solve the real-world difficulty of safety standards at some meaningful level. Also, this project detect mask from pictures along with real-time videos so this system could be use at airfields, offices, hospitals, and many more public places to guarantee that the safety measures are carried out and people are taking by the rules and laws to wear protective masks at public places. If the detection system classifies as ‘No Mask’, reminders can be given as well as actions can be taken against such individuals to minimize the outspread the corona virus.
+The model uses MobileNetV2 as its backbone architecture, which provides high computational efficiency and is suitable for devices with limited processing capability. Because of this, the system can be easily integrated into various embedded devices such as webcams and alarm systems.
+
+The COVID-19 pandemic has affected industries such as manufacturing, travel, tourism, and hospitality, while also causing a devastating human toll worldwide. This project, based on computer vision and deep learning, aims to address real-world safety challenges by enforcing mask-wearing standards in public places.
+
+The system can detect masks both in images and in real-time video streams, making it applicable in airports, offices, hospitals, and many other public spaces. If the system classifies a person as “No Mask”, it can issue reminders or prompt further action to help minimize the spread of the coronavirus.
